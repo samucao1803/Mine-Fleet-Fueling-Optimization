@@ -1,16 +1,6 @@
 """
-Abastecimento de Frota em Mina - modelo v3 generalizado (esqueleto funcional)
+Abastecimento de Frota em Mina - Script
 
-Estrutura:
-  A. gerar_instancia()      -> dados sinteticos reprodutiveis (seed fixa)
-  B. construir_e_resolver() -> modelo Gurobi com posicoes t (x, y, q, v)
-  C. verificar_solucao()    -> checagem independente da solucao
-  D. rodar_experimentos()   -> loop escalas x seeds -> resultados.csv
-  E. tabela_resumo()        -> tabela do relatorio (media/desvio por escala)
-
-Uso:
-  python abastecimento_mina.py teste          # uma instancia pequena
-  python abastecimento_mina.py experimentos   # 3 escalas x N seeds
 """
 import csv
 import json
@@ -20,57 +10,104 @@ import time
 
 import numpy as np
 
-# ---------------------------------------------------------------------------
-# PARAMETROS DE CALIBRACAO  (TODO: ajustar com os dados reais / gerente)
-# ---------------------------------------------------------------------------
+
+# PARAMETROS DE CALIBRACAO (faixas dos dados reais providos pela Hexagon Mining)
+
 PARAMS = {
-    "postos_por_rota": (3, 4),        # TODO decisao 2
-    "km_trecho": (30.0, 70.0),        # TODO decisao 1 (exemplo usa 30-70 km)
-    "preco_litro": (5.50, 6.20),      # R$/L
-    "fila_min": (5.0, 25.0),          # min
-    "tanque_L": (3000.0, 5000.0),
-    "cons_carregado": (3.0, 4.5),     # L/km
-    "cons_vazio": (1.8, 2.5),         # L/km
-    "reserva_pct": (0.10, 0.15),
-    "nivel_inicial_pct": (0.25, 0.40),  # TODO decisao 3
-    "demanda_por_rota": (1, 3),
-    "custo_hora_parado": 1500.0,      # R$/h  TODO confirmar origem
-    "bombeio_L_por_min": 400.0,       # TODO calibrar com litros/evento
+    "postos_por_rota": (1, 2),
+    "dist_km": (1.0, 13.318),           # distancia da origem -> destino 
+    "vel_carregado_kmh": (8.0, 35.0),   # velocidade media carregado por rota
+    "vel_vazio_kmh": (12.0, 45.0),      # velocidade media vazio por rota
+    "preco_litro": (6.70, 6.70),        # preco unico em R$/L
+    "fila_min": (6.0, 25.0),            # fila fixa por posto
+    "tanque_L": (500.0, 5300.0),        # capacidade do tanque
+    "cons_carregado_Lh": (107.5, 592.0),   # consumo carregado L/H
+    "cons_vazio_Lh": (80.6, 289.0),        # consumo vazio L/H
+    "ruido_porte": 0.10,                # Desvio do consumo em relacao ao porte do tanque
+    "reserva_pct": (0.10, 0.15),        # Reserva de capacidade minima do tanque
+    "nivel_inicial_pct": (0.15, 0.90),  # Nivel inicial do tanque
+    "demanda_por_rota": (1, 3),         # Demanda de caminhões por rota
+    "custo_hora_parado": 1500.0,        # Custo da hora parada R$/h estimado.
+    "bombeio_L_por_min": 600.0, # Taxa de bombeio L/mim estimado
 }
 
-# escala: (caminhoes, rotas, ciclos, demanda_minima_total_maxima)
+# escala no formato: caminhoes, rotas, ciclos, demanda_minima_total_maxima
 ESCALAS = {
     "pequena": (5, 2, 4, 4),
     "media": (15, 3, 6, 9),
     "grande": (40, 3, 8, 12),
+    "realista": (40, 3, 20, 12),
+    "realista_12r": (40, 12, 20, 12),
 }
-SEEDS = range(1, 11)          # TODO decisao 4
-TEMPO_LIMITE_S = 600          # TODO decisao 4
+
+# perfis de mina, com K, R, C e turnos/dia sorteados nas faixas 
+PERFIS = {
+    "mina_media": {"K": (10, 30), "R": (3, 8), "C": (8, 20), "turnos": (2, 3)},
+    "mina_grande": {"K": (30, 100), "R": (8, 20), "C": (7, 20), "turnos": (2, 3)},
+}
+SEEDS = range(1, 11)          #  10 seeds por escala
+TEMPO_LIMITE_S = 600          #  600 s por rodada
 
 
-# ---------------------------------------------------------------------------
-# A. GERADOR DE INSTANCIAS
-# ---------------------------------------------------------------------------
+def amostrar_perfil(nome, seed):
+    """Sorteia (K, R, C, turnos, demanda_max_total) nas faixas do perfil de mina."""
+    f = PERFIS[nome]
+    rng = np.random.default_rng([seed, list(PERFIS).index(nome) + 1])
+    K, R, C, turnos = (int(rng.integers(f[c][0], f[c][1] + 1)) for c in ("K", "R", "C", "turnos"))
+    return K, R, C, turnos, max(R, K // 2)      # demanda total ate metade da frota 
+
+
+def casos(seeds=SEEDS):
+    """Todos os casos de teste: (nome, seed, K, R, C, demanda_max, turnos_dia)."""
+    for nome, (K, R, C, dmax) in ESCALAS.items():
+        for s in seeds:
+            yield nome, s, K, R, C, dmax, None
+    for nome in PERFIS:
+        for s in seeds:
+            K, R, C, turnos, dmax = amostrar_perfil(nome, s)
+            yield nome, s, K, R, C, dmax, turnos
+
+
+
+# GERADOR DE INSTANCIAS
+
 def gerar_instancia(K, R, C, seed, demanda_max_total=None, params=PARAMS):
     rng = np.random.default_rng(seed)
     u = lambda faixa: float(rng.uniform(*faixa))
 
-    # rotas e postos (trecho p = percurso feito para chegar ao posto p)
-    rotas = []
+    # calcula as rotas (Ida e volta)
+    rotas, rotas_info = [], []
     for r in range(R):
         n = int(rng.integers(params["postos_por_rota"][0], params["postos_por_rota"][1] + 1))
-        n_vazio = n // 2          # primeiros trechos vazios, demais carregados
+        d = u(params["dist_km"])
+        vc, vv = u(params["vel_carregado_kmh"]), u(params["vel_vazio_kmh"])
+        L = 2.0 * d
+        a = float(rng.uniform(0.0, L))                  
+        gaps = rng.dirichlet([4.0] * n) * L             
+
+        def carr_ate(x):                                
+            m, rem = divmod(x, L)
+            return m * d + min(rem, d)
+
+        pos = [a]
+        for p in range(1, n):
+            pos.append(pos[-1] + gaps[p])
+        trechos = [(pos[-1], a + L)] + [(pos[p - 1], pos[p]) for p in range(1, n)]
+
         postos = []
-        for p in range(n):
+        for (ini, fim) in trechos:
+            km_c = carr_ate(fim) - carr_ate(ini)
+            km_v = (fim - ini) - km_c
             postos.append({
-                "km": u(params["km_trecho"]),
-                "estado": "vazio" if p < n_vazio else "carregado",
+                "km_carr": km_c, "km_vazio": km_v,
+                "t_carr_h": km_c / vc, "t_vazio_h": km_v / vv,
                 "preco": u(params["preco_litro"]),
                 "fila_min": u(params["fila_min"]),
             })
         rotas.append(postos)
+        rotas_info.append({"dist_km": d, "v_carr": vc, "v_vazio": vv, "n_postos": n})
 
-    # demanda minima por rota (soma <= demanda_max_total e <= K)
+    # demanda minima por rota 
     lo, hi = params["demanda_por_rota"]
     demanda = [int(rng.integers(lo, hi + 1)) for _ in range(R)]
     teto = min(K, demanda_max_total if demanda_max_total else K)
@@ -78,38 +115,48 @@ def gerar_instancia(K, R, C, seed, demanda_max_total=None, params=PARAMS):
         i = int(rng.choice([r for r in range(R) if demanda[r] > 1]))
         demanda[i] -= 1
 
-    # caminhoes (garante viabilidade: todo trecho cabe em tanque - reserva)
-    def cons_trecho(cam, p_dict):
-        c = cam["c_carr"] if p_dict["estado"] == "carregado" else cam["c_vazio"]
-        return p_dict["km"] * c
+    # caminhoes
+    def cons_trecho(cam, p):
+        return cam["c_carr"] * p["t_carr_h"] + cam["c_vazio"] * p["t_vazio_h"]
 
+    lo_t, hi_t = params["tanque_L"]
+    lo_c, hi_c = params["cons_carregado_Lh"]
+    lo_v, hi_v = params["cons_vazio_Lh"]
+    rejeicoes = ajustados = 0
     caminhoes = []
     for k in range(K):
         for _ in range(1000):
-            tanque = u(params["tanque_L"])
+            s = float(rng.uniform())                    # porte do caminhao
+            sc = float(np.clip(s + rng.normal(0, params["ruido_porte"]), 0, 1))
+            sv = float(np.clip(s + rng.normal(0, params["ruido_porte"]), 0, 1))
+            tanque = lo_t + s * (hi_t - lo_t)
             cam = {
                 "tanque": tanque,
-                "c_carr": u(params["cons_carregado"]),
-                "c_vazio": u(params["cons_vazio"]),
+                "c_carr": lo_c + sc * (hi_c - lo_c),
+                "c_vazio": lo_v + sv * (hi_v - lo_v),
                 "reserva": u(params["reserva_pct"]) * tanque,
             }
             maior = max(cons_trecho(cam, p) for rt in rotas for p in rt)
             if maior <= tanque - cam["reserva"]:
                 break
+            rejeicoes += 1
         else:
             raise RuntimeError("nao foi possivel gerar caminhao viavel; revise as faixas")
-        # nivel inicial deve cobrir ao menos o 1o trecho de qualquer rota + reserva
+        
         primeiro = max(cons_trecho(cam, rt[0]) for rt in rotas)
-        cam["nivel_inicial"] = min(
-            tanque, max(u(params["nivel_inicial_pct"]) * tanque, cam["reserva"] + primeiro)
-        )
+        desejado = u(params["nivel_inicial_pct"]) * tanque
+        minimo = cam["reserva"] + primeiro
+        cam["nivel_inicial"] = min(tanque, max(desejado, minimo))
+        ajustados += desejado < minimo
         caminhoes.append(cam)
 
     return {
         "K": K, "R": R, "C": C, "seed": seed,
-        "rotas": rotas, "caminhoes": caminhoes, "demanda": demanda,
+        "rotas": rotas, "rotas_info": rotas_info,
+        "caminhoes": caminhoes, "demanda": demanda,
         "custo_hora": params["custo_hora_parado"],
         "bombeio_L_por_min": params["bombeio_L_por_min"],
+        "diag_gen": {"rejeicoes": rejeicoes, "nivel_ajustado": int(ajustados)},
     }
 
 
@@ -121,29 +168,57 @@ def derivados(inst):
     cons = []
     for cam in inst["caminhoes"]:
         cons.append([
-            [p["km"] * (cam["c_carr"] if p["estado"] == "carregado" else cam["c_vazio"])
-             for p in rt] for rt in inst["rotas"]
+            [cam["c_carr"] * p["t_carr_h"] + cam["c_vazio"] * p["t_vazio_h"] for p in rt]
+            for rt in inst["rotas"]
         ])
     return pi, F, cons
 
 
-# ---------------------------------------------------------------------------
-# B. MODELO GUROBI (v3)
-# ---------------------------------------------------------------------------
+def diagnostico(inst):
+    """Estatisticas do gerador (nao usa o Gurobi): quanto os caminhoes precisam abastecer."""
+    K, R, C = inst["K"], inst["R"], inst["C"]
+    P = max(len(rt) for rt in inst["rotas"])
+    T = C * P
+    _, _, cons = derivados(inst)
+
+    def consumo_horizonte(k, r):                        
+        n = len(inst["rotas"][r])
+        return sum(cons[k][r][(t - 1) % P] for t in range(1, T + 1) if (t - 1) % P < n)
+
+    precisa = 0
+    for k, cam in enumerate(inst["caminhoes"]):
+        folga = cam["nivel_inicial"] - cam["reserva"]
+        precisa += min(consumo_horizonte(k, r) for r in range(R)) > folga
+    ciclo_h = [sum(p["t_carr_h"] + p["t_vazio_h"] for p in rt) for rt in inst["rotas"]]
+    ciclo_L = [sum(cons[k][r]) for k in range(K) for r in range(R)]
+    n_postos_total = sum(len(rt) for rt in inst["rotas"])
+    return {
+        "frac_precisa_abast": precisa / K,
+        "tempo_ciclo_h": statistics.mean(ciclo_h),
+        "consumo_ciclo_L": statistics.mean(ciclo_L),
+        "rejeicoes": inst["diag_gen"]["rejeicoes"],
+        "frac_nivel_ajustado": inst["diag_gen"]["nivel_ajustado"] / K,
+        "n_bin_aprox": K * R + K * C * n_postos_total,
+    }
+
+
+
+# MODELO GUROBI 
+
 def construir_e_resolver(inst, tempo_limite=TEMPO_LIMITE_S, gap=1e-4, log=False):
     import gurobipy as gp
     from gurobipy import GRB
 
     K, R, C = inst["K"], inst["R"], inst["C"]
     n_postos = [len(rt) for rt in inst["rotas"]]
-    P = max(n_postos)                  # posicoes por ciclo
-    T = C * P + 1                      # ultima posicao = chegada final
+    P = max(n_postos)                  
+    T = C * P                          
     pi, F, cons = derivados(inst)
 
-    def p_of(t):                       # indice do posto na posicao t (1..T)
+    def p_of(t):                       
         return (t - 1) % P
 
-    def c_of(k, r, t):                 # consumo do trecho que chega em t (0 se posicao vazia)
+    def c_of(k, r, t):                 
         p = p_of(t)
         return cons[k][r][p] if p < n_postos[r] else 0.0
 
@@ -158,7 +233,7 @@ def construir_e_resolver(inst, tempo_limite=TEMPO_LIMITE_S, gap=1e-4, log=False)
     U = [c["tanque"] - c["reserva"] for c in cam]
 
     x = m.addVars(K, R, vtype=GRB.BINARY, name="x")
-    # y, q apenas onde existe posto: t = 1..T-1 e p(t) < n_postos[r]
+    
     idx = [(k, t, r) for k in range(K) for r in range(R)
            for t in range(1, T) if p_of(t) < n_postos[r]]
     y = m.addVars(idx, vtype=GRB.BINARY, name="y")
@@ -168,8 +243,8 @@ def construir_e_resolver(inst, tempo_limite=TEMPO_LIMITE_S, gap=1e-4, log=False)
     v = m.addVars(K, range(1, T + 1), name="v")
     for k in range(K):
         for t in range(1, T + 1):
-            v[k, t].LB = cam[k]["reserva"]     # (2) reserva
-            v[k, t].UB = cam[k]["tanque"]      # (3) capacidade
+            v[k, t].LB = cam[k]["reserva"]     
+            v[k, t].UB = cam[k]["tanque"]      
 
     # objetivo
     m.setObjective(
@@ -178,18 +253,18 @@ def construir_e_resolver(inst, tempo_limite=TEMPO_LIMITE_S, gap=1e-4, log=False)
         GRB.MINIMIZE)
 
     for k in range(K):
-        # (1) balanco
+        # balanco
         m.addConstr(v[k, 1] == cam[k]["nivel_inicial"]
                     - gp.quicksum(c_of(k, r, 1) * x[k, r] for r in range(R)))
         for t in range(2, T + 1):
             compra = gp.quicksum(q[k, t - 1, r] for r in range(R) if (k, t - 1, r) in q)
             m.addConstr(v[k, t] == v[k, t - 1] + compra
                         - gp.quicksum(c_of(k, r, t) * x[k, r] for r in range(R)))
-        # (5) nao enche alem do tanque
+        #  nao enche alem do tanque
         for t in range(1, T):
             compra = gp.quicksum(q[k, t, r] for r in range(R) if (k, t, r) in q)
             m.addConstr(v[k, t] + compra <= cam[k]["tanque"])
-        # (6) alocacao unica
+        #  alocacao unica
         m.addConstr(x.sum(k, "*") == 1)
     for (k, t, r) in idx:
         m.addConstr(q[k, t, r] <= U[k] * y[k, t, r])   # (4)
@@ -219,21 +294,21 @@ def construir_e_resolver(inst, tempo_limite=TEMPO_LIMITE_S, gap=1e-4, log=False)
     return res
 
 
-# ---------------------------------------------------------------------------
+
 # C. VERIFICADOR INDEPENDENTE (nao usa o Gurobi)
-# ---------------------------------------------------------------------------
+
 def verificar_solucao(inst, res, tol=1e-4):
     """Reconstroi niveis e custo a partir de (rota, paradas) e confere restricoes."""
     if res["sol"] is None:
         return False, "sem solucao"
     K, C = inst["K"], inst["C"]
     P = max(len(rt) for rt in inst["rotas"])
-    T = C * P + 1
+    T = C * P
     pi, F, cons = derivados(inst)
     rota = res["sol"]["rota"]
     paradas = {tuple(map(int, kk.split(","))): lit for kk, lit in res["sol"]["paradas"].items()}
 
-    # demanda e alocacao unica (ja implicita em 'rota')
+    # demanda e alocacao unica 
     for r in range(inst["R"]):
         if sum(1 for k in range(K) if rota[k] == r) < inst["demanda"][r]:
             return False, f"demanda da rota {r} nao atendida"
@@ -260,43 +335,52 @@ def verificar_solucao(inst, res, tol=1e-4):
     return True, "ok"
 
 
-# ---------------------------------------------------------------------------
-# D. EXPERIMENTOS  /  E. TABELA
-# ---------------------------------------------------------------------------
+
+# EXPERIMENTOS  /  TABELA
+
 CAMPOS = ["escala", "seed", "K", "R", "C", "T", "n_bin", "n_cont", "n_restr",
-          "status", "tempo_s", "custo_otimo", "gap", "n_paradas", "verificada"]
+          "status", "tempo_s", "custo_otimo", "turnos_dia", "custo_dia", "gap",
+          "n_paradas", "frac_precisa_abast", "verificada"]
 
 
 def rodar_experimentos(saida="resultados.csv"):
     with open(saida, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=CAMPOS)
         w.writeheader()
-        for nome, (K, R, C, dmax) in ESCALAS.items():
-            for seed in SEEDS:
-                inst = gerar_instancia(K, R, C, seed, demanda_max_total=dmax)
-                with open(f"inst_{nome}_{seed}.json", "w") as fi:
-                    json.dump(inst, fi)
-                res = construir_e_resolver(inst)
-                ok, msg = verificar_solucao(inst, res)
-                P = max(len(rt) for rt in inst["rotas"])
-                w.writerow({
-                    "escala": nome, "seed": seed, "K": K, "R": R, "C": C,
-                    "T": C * P + 1, "n_bin": res["n_bin"], "n_cont": res["n_cont"],
-                    "n_restr": res["n_restr"], "status": res["status"],
-                    "tempo_s": round(res["tempo_s"], 3),
-                    "custo_otimo": res["custo"], "gap": res["gap"],
-                    "n_paradas": res.get("n_paradas"), "verificada": ok,
-                })
-                f.flush()
-                print(f"{nome} seed={seed}: custo={res['custo']} "
-                      f"tempo={res['tempo_s']:.2f}s verificada={ok} ({msg})")
+        for nome, seed, K, R, C, dmax, turnos in casos():
+            inst = gerar_instancia(K, R, C, seed, demanda_max_total=dmax)
+            with open(f"inst_{nome}_{seed}.json", "w") as fi:
+                json.dump(inst, fi)
+            diag = diagnostico(inst)
+            res = construir_e_resolver(inst)
+            ok, msg = verificar_solucao(inst, res)
+            P = max(len(rt) for rt in inst["rotas"])
+            custo_dia = res["custo"] * turnos if (turnos and res["custo"] is not None) else None
+            w.writerow({
+                "escala": nome, "seed": seed, "K": K, "R": R, "C": C,
+                "T": C * P, "n_bin": res["n_bin"], "n_cont": res["n_cont"],
+                "n_restr": res["n_restr"], "status": res["status"],
+                "tempo_s": round(res["tempo_s"], 3),
+                "custo_otimo": res["custo"], "turnos_dia": turnos, "custo_dia": custo_dia,
+                "gap": res["gap"], "n_paradas": res.get("n_paradas"),
+                "frac_precisa_abast": round(diag["frac_precisa_abast"], 3),
+                "verificada": ok,
+            })
+            f.flush()
+            print(f"{nome} seed={seed} ({K}x{R}x{C}): custo={res['custo']} "
+                  f"tempo={res['tempo_s']:.2f}s verificada={ok} ({msg})")
+
+
+def _faixa(valores):
+    lo, hi = min(valores), max(valores)
+    return f"{lo}" if lo == hi else f"{lo}-{hi}"
 
 
 def tabela_resumo(entrada="resultados.csv"):
     linhas = list(csv.DictReader(open(entrada)))
-    print("| Instancia | KxRxC | Bin./Cont. | Restr. | Tempo medio (s) | Desvio | Custo medio (R$) | Gap max |")
+    print("| Instancia | KxRxC | Bin./Cont. | Restr. | Tempo medio (s) | Desvio | Custo medio (R$/turno) | Gap max |")
     print("|---|---|---|---|---|---|---|---|")
-    for nome in ESCALAS:
+    for nome in list(ESCALAS) + list(PERFIS):
         L = [l for l in linhas if l["escala"] == nome and l["custo_otimo"]]
         if not L:
             continue
@@ -304,7 +388,8 @@ def tabela_resumo(entrada="resultados.csv"):
         custos = [float(l["custo_otimo"]) for l in L]
         gaps = [float(l["gap"]) for l in L]
         dp = statistics.stdev(tempos) if len(tempos) > 1 else 0.0
-        print(f"| {nome} | {L[0]['K']}x{L[0]['R']}x{L[0]['C']} "
+        dims = "x".join(_faixa([int(l[c]) for l in L]) for c in ("K", "R", "C"))
+        print(f"| {nome} | {dims} "
               f"| {statistics.mean(int(l['n_bin']) for l in L):.0f}/"
               f"{statistics.mean(int(l['n_cont']) for l in L):.0f} "
               f"| {statistics.mean(int(l['n_restr']) for l in L):.0f} "
@@ -312,10 +397,30 @@ def tabela_resumo(entrada="resultados.csv"):
               f"| {statistics.mean(custos):,.2f} | {max(gaps):.4%} |")
 
 
+def tabela_diagnostico():
+    dados = {}
+    for nome, seed, K, R, C, dmax, _ in casos():
+        dados.setdefault(nome, []).append(
+            (K, R, C, diagnostico(gerar_instancia(K, R, C, seed, demanda_max_total=dmax))))
+    print("| Escala | KxRxC | Precisa abastecer | Ciclo (h) | Consumo/ciclo (L) | Binarias (aprox.) | Rejeicoes/inst. | Nivel inicial ajustado |")
+    print("|---|---|---|---|---|---|---|---|")
+    for nome, L in dados.items():
+        D = [d for *_, d in L]
+        mm = lambda c: statistics.mean(d[c] for d in D)
+        dims = "x".join(_faixa([x[i] for x in L]) for i in range(3))
+        print(f"| {nome} | {dims} | {mm('frac_precisa_abast'):.0%} | {mm('tempo_ciclo_h'):.2f} "
+              f"| {mm('consumo_ciclo_L'):.0f} | {min(d['n_bin_aprox'] for d in D):,}-"
+              f"{max(d['n_bin_aprox'] for d in D):,} | {mm('rejeicoes'):.1f} "
+              f"| {mm('frac_nivel_ajustado'):.0%} |")
+
+
 if __name__ == "__main__":
     modo = sys.argv[1] if len(sys.argv) > 1 else "teste"
-    if modo == "teste":
+    if modo == "diagnostico":
+        tabela_diagnostico()
+    elif modo == "teste":
         inst = gerar_instancia(5, 2, 4, seed=1, demanda_max_total=4)
+        print("diagnostico:", diagnostico(inst))
         r = construir_e_resolver(inst, log=False)
         print({k: v for k, v in r.items() if k != "sol"})
         print("verificacao:", verificar_solucao(inst, r))
