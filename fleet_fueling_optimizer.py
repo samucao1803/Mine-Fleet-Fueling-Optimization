@@ -291,6 +291,12 @@ def construir_e_resolver(inst, tempo_limite=TEMPO_LIMITE_S, gap=1e-4, log=False)
                         for (k, t, r) in idx if y[k, t, r].X > 0.5},
         }
         res["n_paradas"] = len(res["sol"]["paradas"])
+
+        #adicionado para ver problemas do false
+        res["x_frac_max"] = max(min(x[k, r].X, 1 - x[k, r].X) for k in range(K) for r in range(R))
+        res["y_frac_max"] = max((min(y[i].X, 1 - y[i].X) for i in idx), default=0.0)
+        res["q_sem_parada"] = sum(q[i].X for i in idx if y[i].X <= 0.5)
+        
     return res
 
 
@@ -321,7 +327,7 @@ def verificar_solucao(inst, res, tol=1e-4):
             p = (t - 1) % P
             nivel -= cons[k][r][p] if p < len(inst["rotas"][r]) else 0.0
             if nivel < cam["reserva"] - tol:
-                return False, f"caminhao {k} abaixo da reserva em t={t}"
+                return False, f"caminhao {k} abaixo da reserva em t={t} (deficit {cam['reserva'] - nivel:.6f} L)"
             if nivel > cam["tanque"] + tol:
                 return False, f"caminhao {k} acima do tanque em t={t}"
             lit = paradas.get((k, t, r), 0.0)
