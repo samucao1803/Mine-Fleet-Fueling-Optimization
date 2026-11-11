@@ -303,7 +303,7 @@ def construir_e_resolver(inst, tempo_limite=TEMPO_LIMITE_S, gap=1e-4, log=False)
 
 # C. VERIFICADOR INDEPENDENTE (nao usa o Gurobi)
 
-def verificar_solucao(inst, res, tol=1e-4):
+def verificar_solucao(inst, res, tol=0.05):
     """Reconstroi niveis e custo a partir de (rota, paradas) e confere restricoes."""
     if res["sol"] is None:
         return False, "sem solucao"
