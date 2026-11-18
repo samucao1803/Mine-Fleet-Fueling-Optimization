@@ -19,14 +19,21 @@ multiplicado pelos turnos por dia (turnos tratados como idênticos e independent
 ## Estrutura do repositório
 ```
 fleet_fueling_optimizer.py       gerador de instâncias, modelo Gurobi, verificador e experimentos
-sensibilidade_custo_hora.py      experimento de sensibilidade ao custo da hora parada
 graphics/
-  graphics.py                    gera as figuras e a tabela-resumo a partir de results/resultados.csv
+  graphics.py                    figuras e tabela-resumo a partir de results/resultados.csv
   fig*.png, tabela_resumo.*      figuras e tabela geradas
-instances/                       instâncias geradas (inst_<escala>_<seed>.json)
+sensibilidade/
+  sensibilidade_custo_hora.py    experimento de sensibilidade ao custo da hora parada
+  graficos_sensibilidade.py      figuras e tabela da sensibilidade
+  sens1..sens5_*.png/.pdf        figuras geradas
+  tabela_sensibilidade.*         tabela gerada (CSV, Markdown e LaTeX)
+instances/                       instâncias geradas (inst_<escala>_<seed>.json, 70 arquivos)
 results/
   resultados.csv                 saída dos experimentos principais (70 linhas)
-  sensibilidade_*.csv / *.json   saída dos experimentos de sensibilidade
+  sensibilidade_custo_hora.csv   sensibilidade, escala realista (30 linhas)
+  sens_mina_media.csv            sensibilidade, mina média (30 linhas)
+  sens_mina_grande.csv           sensibilidade, mina grande (18 linhas)
+  teste_sens.csv                 saída do teste rápido (pode ser apagada)
 ```
 As instâncias são sintéticas e reprodutíveis: a mesma escala e a mesma seed sempre geram os mesmos
 dados. O `rodar_experimentos()` grava cada `inst_<escala>_<seed>.json` na pasta atual; eles ficam
@@ -48,12 +55,16 @@ em `instances/` depois de movidos para lá.
 - `rodar_experimentos()` e `tabela_resumo()`: percorrem escalas e perfis × seeds, gravam
   `resultados.csv` e imprimem a tabela do relatório (média e desvio por escala).
 
-`sensibilidade_custo_hora.py`
+`sensibilidade/sensibilidade_custo_hora.py`
 - Importa o otimizador sem alterá-lo e reroda as mesmas instâncias trocando só o custo da hora
   parada (R$/h). Veja a seção "Sensibilidade ao custo da hora parada".
 
 `graphics/graphics.py`
 - Lê o `resultados.csv` e gera as figuras (PNG e PDF) e a tabela-resumo (CSV, Markdown e LaTeX).
+
+`sensibilidade/graficos_sensibilidade.py`
+- Lê os três CSV de sensibilidade em `results/` e gera 5 figuras (PNG e PDF) e a tabela da
+  sensibilidade (CSV, Markdown e LaTeX).
 
 ## Como rodar
 Requer Python 3 e uma licença do Gurobi. A licença de tamanho limitado (instalada via pip) comporta,
@@ -66,6 +77,7 @@ python fleet_fueling_optimizer.py teste          # uma instância 5x2x4
 python fleet_fueling_optimizer.py experimentos   # todas as escalas e perfis x 10 seeds -> resultados.csv
 python graphics/graphics.py results/resultados.csv graphics    # figuras e tabela-resumo
 ```
+Os comandos da sensibilidade estão na seção "Sensibilidade ao custo da hora parada".
 O `experimentos` grava `resultados.csv` na pasta atual; mova-o para `results/`.
 
 ## Calibração dos dados sintéticos
@@ -132,23 +144,63 @@ Com 40 caminhões, a mediana do tempo é 0,3 s com 3 rotas e 8 ciclos, 3,6 s com
 variam um pouco entre rodadas; perto do limite de 600 s, uma mesma instância pode ou não fechar.
 
 ## Sensibilidade ao custo da hora parada
-O custo da hora parada (R$ 1.500/h) é uma estimativa. O experimento reroda as mesmas instâncias com
-R$ 1.500, 5.000 e 15.000 por hora e registra o custo, a divisão do custo (combustível, bombeio e
-fila), o número de paradas, os litros por parada e o "arrependimento": quanto custaria, no cenário
-novo, reusar o plano de abastecimento ótimo do caso-base em vez de reotimizar.
+O custo da hora parada (R$ 1.500/h) é uma estimativa. O experimento reroda as mesmas instâncias
+(mesma seed) com R$ 1.500, 5.000 e 15.000 por hora, mudando só esse valor, e registra o custo, a
+divisão do custo (combustível, bombeio e fila), o número de paradas, os litros por parada e o
+"arrependimento": quanto custaria, no cenário novo, reusar o plano de abastecimento ótimo do
+caso-base em vez de reotimizar.
 
 ```
-python sensibilidade_custo_hora.py media --seeds 1-3                  # teste rápido
-python sensibilidade_custo_hora.py                                    # realista, 10 seeds, 3 valores
-python sensibilidade_custo_hora.py mina_media --saida results/sens_mina_media.csv
-python sensibilidade_custo_hora.py mina_grande --apenas-fechadas --tempo 1800 \
+python sensibilidade/sensibilidade_custo_hora.py media --seeds 1-3                  # teste rápido
+python sensibilidade/sensibilidade_custo_hora.py realista --saida results/sensibilidade_custo_hora.csv
+python sensibilidade/sensibilidade_custo_hora.py mina_media --saida results/sens_mina_media.csv
+python sensibilidade/sensibilidade_custo_hora.py mina_grande --apenas-fechadas --tempo 1800 \
        --saida results/sens_mina_grande.csv
+python sensibilidade/graficos_sensibilidade.py results sensibilidade               # figuras e tabela
 ```
-Opções úteis: `--retomar` continua uma rodada interrompida, `--apenas-fechadas` usa só as seeds que o
-caso-base resolveu ao ótimo, `--seeds` e `--valores` escolhem as seeds e os custos. O caso-base
-(R$ 1.500/h) é conferido contra `results/resultados.csv`.
+Rode da raiz do repositório. Opções úteis: `--retomar` continua uma rodada interrompida,
+`--apenas-fechadas` usa só as seeds que o caso-base resolveu ao ótimo, `--seeds` e `--valores`
+escolhem as seeds e os custos. O caso-base (R$ 1.500/h) é conferido contra `results/resultados.csv`.
 
-Status: em execução. Os resultados e a análise entram aqui quando terminarem.
+### Execução (18/11/2026)
+- Realista (40×3×20): 10 seeds, limite de 600 s. Mina média: 10 seeds, 600 s. Mina grande: 6 seeds (as
+  que fecharam no caso-base), limite de **1.800 s**. Total: 78 linhas.
+- As 78 soluções passam no verificador (`verificada=True`) e o caso-base confere com o `resultados.csv`
+  em todas as instâncias.
+- 9 das 78 linhas não fecharam no limite de tempo (todas com R$ 5.000/h ou 15.000/h), com gap de até
+  4,33% (realista), 7,22% (mina média) e 9,03% (mina grande). Nenhuma ficou inviável.
+
+### Resultados (medianas por escala)
+| Escala | R$/h | Ótimas | Tempo mediano (s) | Gap máx (%) | Custo ÷ base | Fila (%) | L/parada ÷ base | Extra plano base (% med.) |
+|---|---|---|---|---|---|---|---|---|
+| Realista (40×3×20) | 1.500 | 10/10 | 5,5 | 0,01 | 1,00 | 7 | 1,00 | – |
+| Realista (40×3×20) | 5.000 | 10/10 | 92,6 | 0,01 | 1,18 | 20 | 1,01 | 0,02 |
+| Realista (40×3×20) | 15.000 | 8/10 | 183,8 | 4,33 | 1,68 | 41 | 1,05 | 1,25 |
+| Mina média (perfil) | 1.500 | 10/10 | 4,1 | 0,01 | 1,00 | 10 | 1,00 | – |
+| Mina média (perfil) | 5.000 | 9/10 | 10,4 | 0,47 | 1,24 | 25 | 1,03 | 0,00 |
+| Mina média (perfil) | 15.000 | 8/10 | 41,1 | 7,22 | 1,84 | 44 | 1,27 | 3,47 |
+| Mina grande (perfil) | 1.500 | 6/6 | 74,1 | 0,01 | 1,00 | 12 | 1,00 | – |
+| Mina grande (perfil) | 5.000 | 5/6 | 319,6 | 1,65 | 1,28 | 28 | 1,03 | 0,50 |
+| Mina grande (perfil) | 15.000 | 3/6 | 1470,4 | 9,03 | 1,98 | 46 | 1,38 | 7,41 |
+
+Colunas: "Custo ÷ base" é o custo ótimo dividido pelo custo com R$ 1.500/h na mesma instância; "Fila"
+é a parcela do custo ótimo gasta com fila; "L/parada ÷ base" é a razão de litros por parada;
+"Extra plano base" é o arrependimento (custo extra de manter o plano de R$ 1.500/h).
+
+- **O custo cresce menos que proporcionalmente à hora parada.** Com a hora 3,3× e 10× mais cara, o
+  custo mediano sobe 1,18× e 1,68× (realista), 1,24× e 1,84× (mina média), 1,28× e 1,98× (mina grande).
+- **A parcela da fila sobe de 7–12% (R$ 1.500/h) para 41–46% (R$ 15.000/h).**
+- **O número de paradas quase não muda** (mediana de 0,91 a 1,00 do caso-base); o que muda é o
+  tamanho do abastecimento: os litros por parada sobem até 1,27× (mina média) e 1,38× (mina grande) a
+  R$ 15.000/h. O modelo abastece menos vezes, em volumes maiores.
+- **Reotimizar importa quando a hora parada é cara e a frota é grande.** A mediana do custo extra de
+  manter o plano de R$ 1.500/h é de 0,02% a 5.000/h e 1,25% a 15.000/h no realista; 3,47% (máx. 20,2%)
+  na mina média e 7,41% (máx. 10,4%) na mina grande a 15.000/h. Nas linhas que não fecharam, o valor
+  é um limite inferior do arrependimento real.
+- **O tempo de solução cresce com o custo da hora** (mediana da mina grande: 74 s, 320 s e 1.470 s),
+  provavelmente porque, com a fila mais cara, há mais soluções de custo parecido para o solver separar.
+- Figuras em `sensibilidade/`: `sens1_composicao_custo`, `sens2_custo_relativo`,
+  `sens3_paradas_litros`, `sens4_arrependimento` e `sens5_tempo`.
 
 ## Status
 - [x] Modelagem v3 (com `T = C·P`) e documento do projeto
@@ -158,21 +210,11 @@ Status: em execução. Os resultados e a análise entram aqui quando terminarem.
 - [x] Verificador validado com soluções do Gurobi (70 de 70 verificadas)
 - [x] Experimentos nas escalas e perfis (resultados.csv)
 - [x] Figuras e tabela-resumo (`graphics/`)
-- [ ] Sensibilidade ao custo da hora parada (em execução)
-- [ ] Análise dos resultados e relatório
-
-## Validação
-1. Recalcular à mão o custo de um par caminhão-rota (como na seção 8 do PDF do exemplo). *(a fazer)*
-2. Conferir que o verificador devolve `ok` em todas as rodadas do Gurobi. *(feito: 70 de 70)*
-3. Comparar o Gurobi com uma enumeração das atribuições caminhão→rota em instâncias pequenas.
-   *(a fazer)*
+- [x] Sensibilidade ao custo da hora parada (executada em 18/11/2026: 78 linhas, 78 verificadas)
+- [x] Figuras e tabela da sensibilidade (`sensibilidade/`)
 
 ## Pendências
-- Confirmar com o gerente a unidade do consumo (assumido L/h) e a distância (assumida como a de ida).
-- Calibrar a taxa de bombeio com os litros por evento dos dados reais (hoje 600 L/min, estimado).
-- Concluir a sensibilidade ao custo da hora parada e registrar a análise.
-- Decidir como tratar, no relatório, as 8 instâncias que não fecharam em 600 s (reportar o gap ou
-  rerodar com limite de tempo maior).
+- Registrar o processador, a RAM e a versão do Gurobi usados nos experimentos.
 - Comparar o ótimo com uma política simples de abastecimento (ex.: abastecer ao atingir a reserva).
 - Escrever o relatório.
 

@@ -1,50 +1,4 @@
-"""
-Sensibilidade ao custo da hora parada.
 
-Reroda as MESMAS instancias de uma escala (mesma seed => mesmos dados) variando apenas o
-parametro `custo_hora_parado` (R$/h), e registra como o custo e as decisoes de abastecimento mudam.
-O modelo e o verificador de fleet_fueling_optimizer.py NAO sao alterados: este script apenas
-importa as funcoes dele e troca inst["custo_hora"] antes de resolver.
-
-Onde o custo da hora parada entra no modelo (ver derivados() em fleet_fueling_optimizer.py):
-    pi[r][p] = preco + custo_hora / 60 / bombeio_L_por_min      (R$/L comprado, com bombeio)
-    F[r][p]  = custo_hora / 60 * fila_min                       (R$ por parada, pela fila)
-Logo, quanto maior o custo_hora, mais cara cada PARADA (fila) e um pouco mais caro cada LITRO
-(bombeio). O custo do combustivel em si (preco * litros) nao depende do custo_hora.
-
-O que e gravado, por (seed, custo_hora):
-    custo_otimo e sua decomposicao em combustivel / bombeio / fila (R$),
-    n_paradas, litros_total, litros_por_parada, caminhoes_abastecem,
-    arrependimento: quanto custaria, no cenario novo, REUSAR o plano de abastecimento otimo do
-        caso-base (R$ 1.500/h) em vez de reotimizar. Como as restricoes nao dependem do
-        custo_hora, o plano-base continua viavel e so o custo muda.
-        arrependimento = custo(plano-base, custo_hora novo) - custo_otimo(custo_hora novo).
-        Valores levemente negativos (ordem do gap do solver) sao ruido numerico.
-    confere_base: no caso-base, compara com results/resultados.csv (deve dar True).
-    turnos_dia / custo_dia: so nos perfis de mina (custo_dia = custo do turno x turnos/dia).
-
-Uso (a partir da pasta do repositorio, onde esta fleet_fueling_optimizer.py):
-    python sensibilidade_custo_hora.py                          # realista, seeds 1-10, 1500/5000/15000
-    python sensibilidade_custo_hora.py media --seeds 1-3        # teste rapido (cabe na licenca limitada)
-    python sensibilidade_custo_hora.py realista mina_media      # mais de uma escala
-    python sensibilidade_custo_hora.py realista --valores 1500,3000,5000,15000
-
-Escalas grandes / rodadas longas (mina_grande, realista_12r):
-    --tempo 1800         limite do Gurobi por resolucao, em segundos (padrao 600)
-    --apenas-fechadas    so roda as seeds que o caso-base (results/resultados.csv) resolveu ao
-                         otimo (status 2). Em seeds que ja estouravam o tempo no caso-base o
-                         "arrependimento" fica ruidoso, pois o plano-base nao e otimo.
-    --retomar            continua uma rodada interrompida: pula o que ja esta no CSV de saida
-                         e acrescenta o resto (o CSV e a lista de solucoes sao gravados a cada
-                         resolucao, entao nada se perde se o computador dormir ou voce parar).
-    --seeds 1-5 --saida results/sens_a.csv   e    --seeds 6-10 --saida results/sens_b.csv
-                         rodando em dois terminais ao mesmo tempo (um nucleo cada, pois o modelo
-                         usa Threads=1). Depois e so juntar os dois CSV.
-
-Saidas:
-    results/sensibilidade_custo_hora.csv             (uma linha por escala x seed x custo_hora)
-    results/sensibilidade_custo_hora_solucoes.json   (rota e paradas de cada solucao)
-"""
 import argparse
 import copy
 import csv
@@ -53,11 +7,14 @@ import sys
 import time
 from pathlib import Path
 
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import fleet_fueling_optimizer as ffo
 
 VALORES_PADRAO = (1500.0, 5000.0, 15000.0)
 ESCALA_PADRAO = "realista"
-TOL_BASE = 1e-3            # tolerancia relativa para conferir o caso-base com resultados.csv
+TOL_BASE = 1e-3            # tolerancia 
 STATUS_OTIMO = 2           # codigo do Gurobi para "otimo"
 
 CAMPOS = ["escala", "seed", "K", "R", "C", "turnos_dia", "custo_hora", "e_base",
