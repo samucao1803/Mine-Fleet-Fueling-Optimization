@@ -44,7 +44,7 @@ def salvar(fig, nome):
     print("ok:", nome)
 
 
-# ---------------------------------------------------------------- dados
+# dados
 d = pd.concat([pd.read_csv(PASTA / f) for f in ARQS.values()], ignore_index=True)
 assert d.verificada.all(), "ha solucao nao verificada"
 assert d.confere_base.dropna().all(), "caso-base nao confere com resultados.csv"
@@ -56,7 +56,7 @@ d["fila_pct"] = 100 * d.custo_fila / d.custo_otimo
 d["comb_pct"] = 100 * d.custo_combustivel / d.custo_otimo
 d["bomb_pct"] = 100 * d.custo_bombeio / d.custo_otimo
 d["aberta"] = d.status != 2
-d["arr"] = d.arrependimento_pct.clip(lower=0)      # ruido numerico (~1e-9) vira 0
+d["arr"] = d.arrependimento_pct.clip(lower=0)      
 escalas = [e for e in ARQS if e in set(d.escala)]
 
 
@@ -65,7 +65,7 @@ def paineis(n=3, w=3.6, h=3.4):
     return fig, np.atleast_1d(axs)
 
 
-# ---- sens1: composicao do custo
+# composicao do custo
 fig, axs = paineis(len(escalas), 3.4, 3.6)
 for ax, e in zip(axs, escalas):
     g = d[d.escala == e].groupby("custo_hora")[["comb_pct", "bomb_pct", "fila_pct"]].median()
@@ -90,7 +90,7 @@ fig.suptitle("Quanto maior o custo da hora parada, maior a parcela do custo de t
              x=0.01, ha="left", fontsize=11, fontweight="bold", y=1.02)
 salvar(fig, "sens1_composicao_custo")
 
-# ---- sens2: custo relativo ao caso-base
+# custo do caso-base
 fig, axs = paineis(len(escalas))
 for ax, e in zip(axs, escalas):
     s = d[d.escala == e]
@@ -111,7 +111,7 @@ axs[0].set_ylabel("Custo ótimo ÷ custo com R$ 1.500/h")
 axs[0].legend(loc="upper left")
 salvar(fig, "sens2_custo_relativo")
 
-# ---- sens3: paradas e litros por parada
+# paradas e litros por parada
 fig, axs = plt.subplots(1, 2, figsize=(8.2, 3.6))
 cores = {"realista": BLUE, "mina_media": ORANGE, "mina_grande": TEAL}
 for e in escalas:
@@ -127,7 +127,7 @@ for ax, t in zip(axs, ["Nº de paradas (relativo ao caso-base)", "Litros por par
 axs[0].legend(loc="lower left")
 salvar(fig, "sens3_paradas_litros")
 
-# ---- sens4: arrependimento
+#  arrependimento
 fig, axs = paineis(len(escalas))
 rng = np.random.default_rng(0)
 for ax, e in zip(axs, escalas):
@@ -150,7 +150,7 @@ axs[-1].legend(handles=[Line2D([], [], marker="o", ls="", color=BLUE, label="Ins
                         Line2D([], [], color=INK, lw=2, label="Mediana")], loc="upper left")
 salvar(fig, "sens4_arrependimento")
 
-# ---- sens5: tempo de solucao
+#  tempo de solucao
 fig, axs = paineis(len(escalas))
 for ax, e in zip(axs, escalas):
     s = d[d.escala == e]
@@ -171,7 +171,7 @@ axs[0].set_ylabel("Tempo de solução (s)")
 axs[0].legend(loc="upper left")
 salvar(fig, "sens5_tempo")
 
-# ---- tabela
+# tabela
 L = []
 for e in escalas:
     for v in VALORES:

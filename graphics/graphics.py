@@ -1,24 +1,4 @@
 #!/usr/bin/env python3
-"""
-Gera os graficos e a tabela-resumo do relatorio a partir do resultados.csv.
-
-Uso:
-    pip install pandas matplotlib numpy
-    python gerar_graficos.py                         # le ./resultados.csv, grava em ./figuras
-    python gerar_graficos.py caminho/resultados.csv pasta_saida
-
-Saidas (PNG 300 dpi + PDF vetorial de cada figura):
-    fig1_tempo_vs_binarias   tempo de solucao x variaveis binarias (saturacao)
-    fig2_tempo_rotas_ciclos  efeito de rotas x ciclos no tempo (mesmos 40 caminhoes)
-    fig3_resolvidas          instancias resolvidas ao otimo x limite de tempo, por escala
-    fig4_gap_final           gap final das instancias que nao fecharam
-    fig5_custo_escala        custo otimo do turno por escala
-    fig6_custo_diario        custo diario nos perfis de mina x tamanho da frota
-    fig7_tempo_perfis        tempo nos perfis de mina x nº de rotas e caminhoes
-    fig8_normalizado         custo e paradas por caminhao-ciclo (compara escalas)
-    fig9_custo_vs_paradas    custo do turno x nº de paradas para abastecer
-    tabela_resumo.csv / tabela_resumo.md / tabela_resumo.tex
-"""
 import sys
 from pathlib import Path
 
@@ -34,13 +14,13 @@ CSV = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("resultados.csv")
 OUT = Path(sys.argv[2]) if len(sys.argv) > 2 else Path("figuras")
 OUT.mkdir(parents=True, exist_ok=True)
 
-LIMITE_S = 600.0          # limite de tempo do Gurobi usado nos experimentos
-OTIMO, LIMITE = 2, 9      # codigos de status do Gurobi
+LIMITE_S = 600.0          
+OTIMO, LIMITE = 2, 9      
 
-# ----------------------------------------------------------------- estilo
+
 INK, INK2, MUTED = "#0b0b0b", "#52514e", "#8a8984"
 GRID, SURFACE = "#e6e5e1", "#ffffff"
-BLUE, ORANGE = "#2a78d6", "#eb6834"      # series 1 e 2 (paleta validada, ordem fixa)
+BLUE, ORANGE = "#2a78d6", "#eb6834"      
 
 plt.rcParams.update({
     "font.family": "DejaVu Sans", "font.size": 9,
@@ -87,7 +67,7 @@ def fmt_milhar(x, _=None):
     return f"{x:,.0f}".replace(",", ".")
 
 
-# ----------------------------------------------------------------- dados
+# dados
 d = pd.read_csv(CSV)
 d["familia"] = np.where(d.escala.isin(MINA), "Perfis de mina (K, R, C sorteados)", "Escalas sintéticas")
 d["fechou"] = d.status == OTIMO
@@ -97,7 +77,7 @@ assert d.verificada.all(), "ha linhas com verificada=False: resolva antes de usa
 
 COR = {"Escalas sintéticas": BLUE, "Perfis de mina (K, R, C sorteados)": ORANGE}
 
-# =========================================================== FIG 1: saturacao
+# saturacao
 fig, ax = plt.subplots(figsize=(6.6, 4.2))
 for fam, g in d.groupby("familia"):
     ok, lim = g[g.fechou], g[~g.fechou]
@@ -120,7 +100,7 @@ h = [Line2D([], [], marker="o", ls="", color=BLUE, label="Escalas sintéticas"),
 ax.legend(handles=h, loc="lower right", fontsize=8)
 salvar(fig, "fig1_tempo_vs_binarias")
 
-# =========================================== FIG 2: rotas x ciclos (K = 40)
+# rotas x ciclos 
 esc2 = ["grande", "realista", "realista_12r"]
 rot2 = {"grande": "3 rotas\n8 ciclos", "realista": "3 rotas\n20 ciclos", "realista_12r": "12 rotas\n20 ciclos"}
 fig, ax = plt.subplots(figsize=(5.4, 4.2))
@@ -150,7 +130,7 @@ ax.legend(handles=[Line2D([], [], marker="o", ls="", color=MUTED, label="ótimo"
           loc="lower right", fontsize=8)
 salvar(fig, "fig2_tempo_rotas_ciclos")
 
-# ======================================================= FIG 3: resolvidas
+# resolvidas
 cont = d.groupby("escala").fechou.agg(["sum", "count"]).reindex(ORDEM)
 cont["nao"] = cont["count"] - cont["sum"]
 fig, ax = plt.subplots(figsize=(6.4, 3.6))
@@ -168,7 +148,7 @@ ax.grid(axis="y", visible=False)
 ax.legend(loc="upper center", bbox_to_anchor=(0.45, -0.18), ncol=2, fontsize=8)
 salvar(fig, "fig3_resolvidas")
 
-# ========================================================= FIG 4: gap final
+#  gap final
 nf = d[~d.fechou].copy()
 nf["rot"] = nf.apply(lambda r: f"{curto(r.escala)} · seed {int(r.seed)}", axis=1)
 nf = nf.sort_values("gap_pct")
@@ -185,7 +165,7 @@ ax.grid(axis="y", visible=False)
 ax.tick_params(axis="y", labelsize=8)
 salvar(fig, "fig4_gap_final")
 
-# ================================================== FIG 5: custo por escala
+#  custo por escala
 fig, ax = plt.subplots(figsize=(6.6, 4.0))
 rng = np.random.default_rng(1)
 for i, e in enumerate(ORDEM):
@@ -207,7 +187,7 @@ ax.grid(axis="x", visible=False)
 ax.set_title("Custo do turno por escala (traço = média)")
 salvar(fig, "fig5_custo_escala")
 
-# ================================================= FIG 6: custo diario minas
+#  custo diario minas
 m = d[d.escala.isin(MINA)].copy()
 fig, ax = plt.subplots(figsize=(6.4, 4.0))
 for e, mk in [("mina_media", "o"), ("mina_grande", "s")]:
@@ -228,7 +208,7 @@ l.append("contorno preto = não fechou em 600 s")
 ax.legend(h, l, loc="upper left", fontsize=8)
 salvar(fig, "fig6_custo_diario")
 
-# ============================================ FIG 7: tempo nos perfis (R, K)
+# tempo nos perfis 
 fig, axs = plt.subplots(1, 2, figsize=(7.4, 3.8), sharey=True)
 for ax, col, rot in [(axs[0], "R", "Rotas (R)"), (axs[1], "K", "Caminhões (K)")]:
     for e, mk in [("mina_media", "o"), ("mina_grande", "s")]:
@@ -250,7 +230,7 @@ axs[1].legend(handles=[Line2D([], [], marker="o", ls="", color=MUTED, label="min
 salvar(fig, "fig7_tempo_perfis")
 
 
-# ============================ FIG 8: custo e paradas normalizados por caminhao-ciclo
+# custo e paradas normalizados por caminhao-ciclo
 d["custo_kc"] = d.custo_otimo / (d.K * d.C)
 d["paradas_kc"] = d.n_paradas / (d.K * d.C)
 fig, axs = plt.subplots(1, 2, figsize=(8.0, 3.9))
@@ -274,7 +254,7 @@ fig.text(0.01, -0.02, "Traço preto = média das 10 seeds. Cada ponto é uma ins
 fig.tight_layout()
 salvar(fig, "fig8_normalizado")
 
-# ============================ FIG 9: custo x paradas
+# custo x paradas
 x = d[d.n_paradas > 0]
 rho = x[["custo_otimo", "n_paradas"]].corr(method="spearman").iloc[0, 1]
 c_med = (x.custo_otimo / x.n_paradas).median()
@@ -293,7 +273,7 @@ ax.set_title(f"Custo × número de paradas (Spearman {rho:.2f})".replace(".", ",
 ax.legend(loc="upper left", fontsize=8)
 salvar(fig, "fig9_custo_vs_paradas")
 
-# ============================================================ tabela-resumo
+# tabela resumo
 def lim_str(v, atingiu):
     return vc(f"≥ {v:.1f}" if atingiu else f"{v:.2f}")
 
@@ -325,7 +305,7 @@ tab = pd.DataFrame(linhas)
 tab.to_csv(OUT / "tabela_resumo.csv", index=False, encoding="utf-8-sig")
 try:
     (OUT / "tabela_resumo.md").write_text(tab.to_markdown(index=False), encoding="utf-8")
-except ImportError:      # 'tabulate' nao instalado: monta a tabela manualmente
+except ImportError:      
     cab = "| " + " | ".join(tab.columns) + " |\n|" + "---|" * len(tab.columns) + "\n"
     corpo = "".join("| " + " | ".join(map(str, r)) + " |\n" for r in tab.values)
     (OUT / "tabela_resumo.md").write_text(cab + corpo, encoding="utf-8")

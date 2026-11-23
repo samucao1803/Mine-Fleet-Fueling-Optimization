@@ -11,7 +11,7 @@ import time
 import numpy as np
 
 
-# PARAMETROS DE CALIBRACAO (faixas dos dados reais providos pela Hexagon Mining)
+# PARAMETROS DE CALIBRACAO 
 
 PARAMS = {
     "postos_por_rota": (1, 2),
@@ -31,7 +31,7 @@ PARAMS = {
     "bombeio_L_por_min": 600.0, # Taxa de bombeio L/mim estimado
 }
 
-# escala no formato: caminhoes, rotas, ciclos, demanda_minima_total_maxima
+# escalas 
 ESCALAS = {
     "pequena": (5, 2, 4, 4),
     "media": (15, 3, 6, 9),
@@ -40,13 +40,13 @@ ESCALAS = {
     "realista_12r": (40, 12, 20, 12),
 }
 
-# perfis de mina, com K, R, C e turnos/dia sorteados nas faixas 
+# perfis de mina
 PERFIS = {
     "mina_media": {"K": (10, 30), "R": (3, 8), "C": (8, 20), "turnos": (2, 3)},
     "mina_grande": {"K": (30, 100), "R": (8, 20), "C": (7, 20), "turnos": (2, 3)},
 }
-SEEDS = range(1, 11)          #  10 seeds por escala
-TEMPO_LIMITE_S = 600          #  600 s por rodada
+SEEDS = range(1, 11)          
+TEMPO_LIMITE_S = 600          
 
 
 def amostrar_perfil(nome, seed):
@@ -54,7 +54,7 @@ def amostrar_perfil(nome, seed):
     f = PERFIS[nome]
     rng = np.random.default_rng([seed, list(PERFIS).index(nome) + 1])
     K, R, C, turnos = (int(rng.integers(f[c][0], f[c][1] + 1)) for c in ("K", "R", "C", "turnos"))
-    return K, R, C, turnos, max(R, K // 2)      # demanda total ate metade da frota 
+    return K, R, C, turnos, max(R, K // 2)      
 
 
 def casos(seeds=SEEDS):
@@ -75,7 +75,7 @@ def gerar_instancia(K, R, C, seed, demanda_max_total=None, params=PARAMS):
     rng = np.random.default_rng(seed)
     u = lambda faixa: float(rng.uniform(*faixa))
 
-    # calcula as rotas (Ida e volta)
+     
     rotas, rotas_info = [], []
     for r in range(R):
         n = int(rng.integers(params["postos_por_rota"][0], params["postos_por_rota"][1] + 1))
@@ -107,7 +107,7 @@ def gerar_instancia(K, R, C, seed, demanda_max_total=None, params=PARAMS):
         rotas.append(postos)
         rotas_info.append({"dist_km": d, "v_carr": vc, "v_vazio": vv, "n_postos": n})
 
-    # demanda minima por rota 
+    
     lo, hi = params["demanda_por_rota"]
     demanda = [int(rng.integers(lo, hi + 1)) for _ in range(R)]
     teto = min(K, demanda_max_total if demanda_max_total else K)
@@ -115,7 +115,7 @@ def gerar_instancia(K, R, C, seed, demanda_max_total=None, params=PARAMS):
         i = int(rng.choice([r for r in range(R) if demanda[r] > 1]))
         demanda[i] -= 1
 
-    # caminhoes
+    
     def cons_trecho(cam, p):
         return cam["c_carr"] * p["t_carr_h"] + cam["c_vazio"] * p["t_vazio_h"]
 
@@ -126,7 +126,7 @@ def gerar_instancia(K, R, C, seed, demanda_max_total=None, params=PARAMS):
     caminhoes = []
     for k in range(K):
         for _ in range(1000):
-            s = float(rng.uniform())                    # porte do caminhao
+            s = float(rng.uniform())                    
             sc = float(np.clip(s + rng.normal(0, params["ruido_porte"]), 0, 1))
             sv = float(np.clip(s + rng.normal(0, params["ruido_porte"]), 0, 1))
             tanque = lo_t + s * (hi_t - lo_t)
@@ -246,31 +246,31 @@ def construir_e_resolver(inst, tempo_limite=TEMPO_LIMITE_S, gap=1e-4, log=False)
             v[k, t].LB = cam[k]["reserva"]     
             v[k, t].UB = cam[k]["tanque"]      
 
-    # objetivo
+    
     m.setObjective(
         gp.quicksum(pi[r][p_of(t)] * q[k, t, r] + F[r][p_of(t)] * y[k, t, r]
                     for (k, t, r) in idx),
         GRB.MINIMIZE)
 
     for k in range(K):
-        # balanco
+        
         m.addConstr(v[k, 1] == cam[k]["nivel_inicial"]
                     - gp.quicksum(c_of(k, r, 1) * x[k, r] for r in range(R)))
         for t in range(2, T + 1):
             compra = gp.quicksum(q[k, t - 1, r] for r in range(R) if (k, t - 1, r) in q)
             m.addConstr(v[k, t] == v[k, t - 1] + compra
                         - gp.quicksum(c_of(k, r, t) * x[k, r] for r in range(R)))
-        #  nao enche alem do tanque
+       
         for t in range(1, T):
             compra = gp.quicksum(q[k, t, r] for r in range(R) if (k, t, r) in q)
             m.addConstr(v[k, t] + compra <= cam[k]["tanque"])
-        #  alocacao unica
+        
         m.addConstr(x.sum(k, "*") == 1)
     for (k, t, r) in idx:
-        m.addConstr(q[k, t, r] <= U[k] * y[k, t, r])   # (4)
-        m.addConstr(y[k, t, r] <= x[k, r])             # (8)
+        m.addConstr(q[k, t, r] <= U[k] * y[k, t, r])   
+        m.addConstr(y[k, t, r] <= x[k, r])             
     for r in range(R):
-        m.addConstr(x.sum("*", r) >= inst["demanda"][r])  # (7)
+        m.addConstr(x.sum("*", r) >= inst["demanda"][r])  
 
     t0 = time.time()
     m.optimize()
@@ -292,7 +292,7 @@ def construir_e_resolver(inst, tempo_limite=TEMPO_LIMITE_S, gap=1e-4, log=False)
         }
         res["n_paradas"] = len(res["sol"]["paradas"])
 
-        #adicionado para ver problemas do false
+        
         res["x_frac_max"] = max(min(x[k, r].X, 1 - x[k, r].X) for k in range(K) for r in range(R))
         res["y_frac_max"] = max((min(y[i].X, 1 - y[i].X) for i in idx), default=0.0)
         res["q_sem_parada"] = sum(q[i].X for i in idx if y[i].X <= 0.5)
@@ -301,7 +301,7 @@ def construir_e_resolver(inst, tempo_limite=TEMPO_LIMITE_S, gap=1e-4, log=False)
 
 
 
-# C. VERIFICADOR INDEPENDENTE (nao usa o Gurobi)
+# VERIFICADOR INDEPENDENTE 
 
 def verificar_solucao(inst, res, tol=0.05):
     """Reconstroi niveis e custo a partir de (rota, paradas) e confere restricoes."""
@@ -314,7 +314,7 @@ def verificar_solucao(inst, res, tol=0.05):
     rota = res["sol"]["rota"]
     paradas = {tuple(map(int, kk.split(","))): lit for kk, lit in res["sol"]["paradas"].items()}
 
-    # demanda e alocacao unica 
+    
     for r in range(inst["R"]):
         if sum(1 for k in range(K) if rota[k] == r) < inst["demanda"][r]:
             return False, f"demanda da rota {r} nao atendida"
@@ -342,7 +342,7 @@ def verificar_solucao(inst, res, tol=0.05):
 
 
 
-# EXPERIMENTOS  /  TABELA
+# EXPERIMENTOS/TABELA
 
 CAMPOS = ["escala", "seed", "K", "R", "C", "T", "n_bin", "n_cont", "n_restr",
           "status", "tempo_s", "custo_otimo", "turnos_dia", "custo_dia", "gap",
