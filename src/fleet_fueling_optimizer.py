@@ -7,6 +7,7 @@ import json
 import statistics
 import sys
 import time
+from pathlib import Path
 
 import numpy as np
 
@@ -349,13 +350,15 @@ CAMPOS = ["escala", "seed", "K", "R", "C", "T", "n_bin", "n_cont", "n_restr",
           "n_paradas", "frac_precisa_abast", "verificada"]
 
 
-def rodar_experimentos(saida="resultados.csv"):
+def rodar_experimentos(saida="results/resultados.csv", pasta_inst="instances"):
+    Path(saida).parent.mkdir(parents=True, exist_ok=True)
+    Path(pasta_inst).mkdir(parents=True, exist_ok=True)
     with open(saida, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=CAMPOS)
         w.writeheader()
         for nome, seed, K, R, C, dmax, turnos in casos():
             inst = gerar_instancia(K, R, C, seed, demanda_max_total=dmax)
-            with open(f"inst_{nome}_{seed}.json", "w") as fi:
+            with open(f"{pasta_inst}/inst_{nome}_{seed}.json", "w") as fi:
                 json.dump(inst, fi)
             diag = diagnostico(inst)
             res = construir_e_resolver(inst)
@@ -382,7 +385,7 @@ def _faixa(valores):
     return f"{lo}" if lo == hi else f"{lo}-{hi}"
 
 
-def tabela_resumo(entrada="resultados.csv"):
+def tabela_resumo(entrada="results/resultados.csv"):
     linhas = list(csv.DictReader(open(entrada)))
     print("| Instancia | KxRxC | Bin./Cont. | Restr. | Tempo medio (s) | Desvio | Custo medio (R$/turno) | Gap max |")
     print("|---|---|---|---|---|---|---|---|")

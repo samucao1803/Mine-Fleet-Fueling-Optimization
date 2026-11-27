@@ -10,7 +10,7 @@ import pandas as pd
 from matplotlib.lines import Line2D
 
 PASTA = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("results")
-OUT = Path(sys.argv[2]) if len(sys.argv) > 2 else Path("figuras_sens")
+OUT = Path(sys.argv[2]) if len(sys.argv) > 2 else Path("figures/sensitivity")
 OUT.mkdir(parents=True, exist_ok=True)
 ARQS = {"realista": "sensibilidade_custo_hora.csv", "mina_media": "sens_mina_media.csv",
         "mina_grande": "sens_mina_grande.csv"}

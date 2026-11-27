@@ -11,8 +11,8 @@ from scipy.optimize import Bounds, LinearConstraint, milp
 
 PASTA_INST = "instances"
 PASTA_RES = "results"
-SAIDA = os.path.join(PASTA_RES, "validacao_decomposicao.csv")
-SAIDA_SENS = os.path.join(PASTA_RES, "validacao_sensibilidade.csv")
+SAIDA = os.path.join(PASTA_RES, "validation", "validacao_decomposicao.csv")
+SAIDA_SENS = os.path.join(PASTA_RES, "validation", "validacao_sensibilidade.csv")
 ARQ_SENS = ["sensibilidade_custo_hora.csv", "sens_mina_media.csv", "sens_mina_grande.csv"]
 TURNO_H = 12.0
 
