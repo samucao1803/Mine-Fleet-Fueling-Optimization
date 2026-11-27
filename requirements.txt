@@ -1,0 +1,11 @@
+# Optimization (requires a Gurobi license; the free academic license covers all instances)
+gurobipy>=11.0
+
+# Instance generator, analysis and figures
+numpy>=1.26
+pandas>=2.0
+matplotlib>=3.8
+tabulate>=0.9
+
+# Independent validation by decomposition (HiGHS via scipy.optimize.milp)
+scipy>=1.11

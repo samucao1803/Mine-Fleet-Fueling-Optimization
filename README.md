@@ -1,236 +1,172 @@
-# Mine-Fleet-Fueling-Optimization
+# Mine Fleet Fueling Optimization
 
-Trabalho de Pesquisa Operacional: otimização do abastecimento de uma frota de caminhões em mina.
-O problema é modelado como programação linear inteira mista (PLIM) e resolvido com Python + Gurobi.
+**English** | [Português](README.pt-BR.md)
 
-**Integrantes:** Samuel Lima Horta, Julia Martins dos Santos, Matheus Guedes Belloni
+![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)
+![Gurobi](https://img.shields.io/badge/Solver-Gurobi%2014-EE3524)
+![Model](https://img.shields.io/badge/Model-MILP-555555)
+![License](https://img.shields.io/badge/License-MIT-green)
 
-## Problema
-Cada caminhão é alocado a uma rota (carga → descarga → volta) e decide em quais postos parar para
-abastecer e quantos litros comprar. O objetivo é minimizar o custo total (combustível + tempo parado
-com bombeio e fila), sem que o tanque chegue a um posto abaixo da reserva de segurança.
+A mixed-integer linear programming (MILP) model that decides, **for a heterogeneous fleet of haul trucks in an open-pit mine, which route each truck runs and when and how much it refuels** over a full shift, minimizing fuel plus downtime cost.
 
-O modelo (versão 3) usa as variáveis `x[k,r]`, `y[k,t,r]`, `q[k,t,r]` e `v[k,t]`, com posições `t`
-numeradas ao longo do turno: `T = C·P`, onde `C` é o número de ciclos e `P` o maior número de postos
-entre as rotas. Com `T = C·P`, toda rota percorre exatamente `C` circuitos completos (ida carregado +
-volta vazio). O modelo resolve um turno; nos perfis de mina, o custo diário é o custo do turno
-multiplicado pelos turnos por dia (turnos tratados como idênticos e independentes).
+Developed as the final project of the Operations Research course (Systems Engineering, Universidade Federal de Minas Gerais, 2026). The full paper (in Portuguese) is in [`docs/artigo_abastecimento_frota_mina.pdf`](docs/artigo_abastecimento_frota_mina.pdf).
 
-## Estrutura do repositório
-```
-fleet_fueling_optimizer.py       gerador de instâncias, modelo Gurobi, verificador e experimentos
-graphics/
-  graphics.py                    figuras e tabela-resumo a partir de results/resultados.csv
-  fig*.png, tabela_resumo.*      figuras e tabela geradas
-sensibilidade/
-  sensibilidade_custo_hora.py    experimento de sensibilidade ao custo da hora parada
-  graficos_sensibilidade.py      figuras e tabela da sensibilidade
-  sens1..sens5_*.png/.pdf        figuras geradas
-  tabela_sensibilidade.*         tabela gerada (CSV, Markdown e LaTeX)
-instances/                       instâncias geradas (inst_<escala>_<seed>.json, 70 arquivos)
-results/
-  resultados.csv                 saída dos experimentos principais (70 linhas)
-  sensibilidade_custo_hora.csv   sensibilidade, escala realista (30 linhas)
-  sens_mina_media.csv            sensibilidade, mina média (30 linhas)
-  sens_mina_grande.csv           sensibilidade, mina grande (18 linhas)
-  teste_sens.csv                 saída do teste rápido (pode ser apagada)
-```
-As instâncias são sintéticas e reprodutíveis: a mesma escala e a mesma seed sempre geram os mesmos
-dados. O `rodar_experimentos()` grava cada `inst_<escala>_<seed>.json` na pasta atual; eles ficam
-em `instances/` depois de movidos para lá.
+---
 
-## Estrutura dos scripts
-`fleet_fueling_optimizer.py`
-- `PARAMS`, `ESCALAS`, `PERFIS`, `SEEDS`, `TEMPO_LIMITE_S`: faixas dos parâmetros, escalas e perfis de
-  mina.
-- `gerar_instancia(K, R, C, seed)`: sorteia rotas, postos, caminhões e demanda, garantindo viabilidade
-  (cada trecho cabe em tanque − reserva e o nível inicial cobre reserva + primeiro trecho).
-- `amostrar_perfil(nome, seed)`: sorteia caminhões, rotas, ciclos e turnos/dia nas faixas de um perfil
-  de mina.
-- `diagnostico(inst)`: estatísticas do gerador (fração de caminhões que precisam abastecer, tempo de
-  ciclo, tamanho aproximado do modelo). Não precisa do Gurobi.
-- `construir_e_resolver(inst)`: monta o modelo v3 (restrições 1 a 8) e devolve status, custo, gap,
-  tempo e tamanho do modelo.
-- `verificar_solucao(inst, res)`: refaz níveis do tanque e custo sem usar o Gurobi, para detectar bugs.
-- `rodar_experimentos()` e `tabela_resumo()`: percorrem escalas e perfis × seeds, gravam
-  `resultados.csv` e imprimem a tabela do relatório (média e desvio por escala).
+## Highlights
 
-`sensibilidade/sensibilidade_custo_hora.py`
-- Importa o otimizador sem alterá-lo e reroda as mesmas instâncias trocando só o custo da hora
-  parada (R$/h). Veja a seção "Sensibilidade ao custo da hora parada".
+- **Integrated formulation.** Truck-to-route assignment and refueling decisions (where to stop and how many liters to buy) are solved together, tracking each truck's fuel level across consecutive cycles with a safety reserve at every arrival.
+- **70 reproducible instances**, from 5 to 95 trucks, 2 to 20 routes and 4 to 20 cycles per shift. Parameter ranges were calibrated on aggregated real operational data (the raw data is confidential).
+- **62/70 instances solved to proven optimality** with Gurobi within 600 s. The remaining 8 stopped with gaps of 0.05% to 1.11%.
+- **Exact validation by decomposition.** An independent truck × route decomposition (solved with HiGHS) reached the same cost on all 70 instances, which shows that those 8 solutions were already optimal and only the optimality proof was missing.
+- **Independent verifier.** Every solution is re-simulated without the solver (fuel levels, reserve, tank capacity, demand and cost) and all 148 solutions passed.
+- **Sensitivity analysis.** When the cost of an idle hour rises from R$ 1,500 to R$ 15,000, the median share of queueing in total cost grows from 7–12% to 41–45%, and reusing the base-case plan costs up to 7.4% more (median, large mine).
 
-`graphics/graphics.py`
-- Lê o `resultados.csv` e gera as figuras (PNG e PDF) e a tabela-resumo (CSV, Markdown e LaTeX).
+## The problem
 
-`sensibilidade/graficos_sensibilidade.py`
-- Lê os três CSV de sensibilidade em `results/` e gera 5 figuras (PNG e PDF) e a tabela da
-  sensibilidade (CSV, Markdown e LaTeX).
+Haul trucks run continuous load → dump → return cycles on routes with fuel stations along the way. Fuel consumption depends on the truck, the segment, and whether it travels loaded or empty, so each truck's tank evolves differently. Every stop prevents the tank from dropping below the safety reserve, but costs time (fixed queue plus pumping). Because the fleet is heterogeneous, **the route a truck is assigned to changes how often it must refuel**, so the two decisions have to be made jointly.
 
-## Como rodar
-Requer Python 3 e uma licença do Gurobi. A licença de tamanho limitado (instalada via pip) comporta,
-em princípio, apenas as instâncias pequena e média; para as demais, use a licença acadêmica gratuita.
+## Mathematical model
 
-```
-pip install gurobipy numpy pandas matplotlib tabulate
-python fleet_fueling_optimizer.py diagnostico    # só o gerador (não precisa do Gurobi)
-python fleet_fueling_optimizer.py teste          # uma instância 5x2x4
-python fleet_fueling_optimizer.py experimentos   # todas as escalas e perfis x 10 seeds -> resultados.csv
-python graphics/graphics.py results/resultados.csv graphics    # figuras e tabela-resumo
-```
-Os comandos da sensibilidade estão na seção "Sensibilidade ao custo da hora parada".
-O `experimentos` grava `resultados.csv` na pasta atual; mova-o para `results/`.
+Each cycle is split into $P = \max_r |S_r|$ positions, and global position $t = 1,\dots,CP$ indexes arrivals over the shift.
 
-## Calibração dos dados sintéticos
-Faixas definidas a partir de dados operacionais agregados (os dados brutos são sigilosos e não devem
-ser versionados).
+| Variable | Domain | Meaning |
+|---|---|---|
+| $x_{k,r}$ | binary | truck $k$ is assigned to route $r$ |
+| $y_{k,t,r}$ | binary | truck $k$ stops at position $t$ of route $r$ |
+| $q_{k,t,r}$ | $\ge 0$ | liters bought by truck $k$ at position $t$ of route $r$ |
+| $v_{k,t}$ | $\ge 0$ | fuel level of truck $k$ on arrival at position $t$ |
 
-| Parâmetro | Faixa |
-|---|---|
-| Distância origem → destino (ida; a volta é igual) | 1.000 a 13.318 m |
-| Postos por rota | 1 ou 2 |
-| Velocidade média carregado / vazio | 8–35 km/h / 12–45 km/h |
-| Consumo carregado / vazio | 107,5–592 / 80,6–289 (L/h, a confirmar) |
-| Capacidade do tanque | 500 a 5.300 L (sorteada junto com o consumo: caminhão maior consome mais) |
-| Reserva de segurança | 10–15% do tanque |
-| Nível inicial | 15–90% do tanque (elevado se não cobrir reserva + primeiro trecho) |
-| Preço do combustível | R$ 6,70 (único) |
-| Fila fixa por posto | 6 a 25 min (uniforme) |
-| Custo da hora parada | R$ 1.500/h (estimativa: custo de posse e operação de caminhão de 150–240 t) |
-| Taxa de bombeio | 600 L/min (estimativa: sistemas de abastecimento rápido operam entre 100 e 1.300 L/min) |
+$$
+\min \sum_{k}\sum_{r}\sum_{t \in T_r} \left( \Pi_{r,p(t)}\, q_{k,t,r} + F_{r,p(t)}\, y_{k,t,r} \right)
+$$
 
-Dinâmica do tanque: cada rota é um circuito de comprimento 2d (ida carregado, volta vazio) com os
-postos em pontos aleatórios; cada trecho entre postos tem uma parte carregada e outra vazia. O consumo do
-trecho é a taxa de consumo (L/h) vezes as horas percorridas (km ÷ velocidade média da rota).
+subject to
 
-## Instâncias
-Dados sintéticos com seed fixa, 10 seeds por escala.
+$$
+\begin{aligned}
+& v_{k,1} = I_k - \textstyle\sum_r g_{k,r,p(1)}\, x_{k,r} && \text{initial level} \\
+& v_{k,t} = v_{k,t-1} + \textstyle\sum_r q_{k,t-1,r} - \sum_r g_{k,r,p(t)}\, x_{k,r} && \text{fuel balance across cycles} \\
+& L_k \le v_{k,t} \le Q_k && \text{safety reserve and tank capacity} \\
+& q_{k,t,r} \le (Q_k - L_k)\, y_{k,t,r} && \text{buy only when stopping} \\
+& v_{k,t} + \textstyle\sum_r q_{k,t,r} \le Q_k && \text{no overfilling} \\
+& \textstyle\sum_r x_{k,r} = 1, \quad \sum_k x_{k,r} \ge D_r && \text{assignment and minimum demand per route} \\
+& y_{k,t,r} \le x_{k,r} && \text{stops only on the assigned route}
+\end{aligned}
+$$
 
-| Escala | Caminhões × rotas × ciclos |
-|---|---|
-| Pequena | 5 × 2 × 4 |
-| Média | 15 × 3 × 6 |
-| Grande | 40 × 3 × 8 |
-| Realista | 40 × 3 × 20 |
-| Realista (12 rotas) | 40 × 12 × 20 |
+$\Pi$ is the cost per liter (fuel price + idle-hour cost × pumping time), $F$ is the fixed queue cost of a stop and $g_{k,r,p}$ is the consumption of truck $k$ on the segment arriving at position $p$, computed from loaded/empty distances, speeds and consumption rates. The full derivation and modeling discussion are in Section 3 of the paper.
 
-Perfis de mina (cada seed sorteia uma combinação nas faixas):
+## Method
 
-| Perfil | Caminhões | Rotas ativas | Ciclos/turno | Turnos/dia |
+| Step | Tool | Purpose |
+|---|---|---|
+| Instance generator | NumPy (fixed seeds) | Synthetic, reproducible, feasible by construction |
+| Integrated MILP | Gurobi 14 (branch-and-cut) | Exact solution, 1 thread, 0.01% gap, 600 s limit |
+| Solution verifier | Pure Python | Re-simulates tanks and cost without the solver |
+| Decomposition | SciPy `milp` (HiGHS) | One subproblem per (truck, route) pair + assignment problem; certifies optimality |
+| Baseline policy | Pure Python | "Refuel only when the next segment would break the reserve", for comparison |
+
+Because queues are fixed per station, once a truck's route is fixed its refueling plan does not depend on the other trucks. This is what makes the exact decomposition possible.
+
+## Results
+
+| Instance group | Trucks × routes × cycles | Optimal | Median time (s) | Max gap |
 |---|---|---|---|---|
-| Mina de médio porte | 10–30 | 3–8 | 8–20 | 2–3 |
-| Mina de grande porte | 30–100 | 8–20 | 7–20 | 2–3 |
+| Small | 5 × 2 × 4 | 10/10 | 0.01 | ≤ 0.01% |
+| Medium | 15 × 3 × 6 | 10/10 | 0.05 | ≤ 0.01% |
+| Large | 40 × 3 × 8 | 10/10 | 0.30 | ≤ 0.01% |
+| Realistic | 40 × 3 × 20 | 10/10 | 3.60 | ≤ 0.01% |
+| Realistic, 12 routes | 40 × 12 × 20 | 6/10 | 286 | 1.11% |
+| Mid-size mine (profile) | 11–30 × 3–8 × 8–19 | 10/10 | 1.48 | ≤ 0.01% |
+| Large mine (profile) | 32–95 × 8–20 × 9–20 | 6/10 | 188 | 0.64% |
 
-Demanda mínima: pelo menos 1 caminhão por rota, com total limitado à metade da frota nos perfis.
+<p align="center">
+  <img src="figures/main/fig2_tempo_rotas_ciclos.png" width="520" alt="Solution time for 40 trucks with different numbers of routes and cycles">
+</p>
 
-## Resultados dos experimentos principais
-Segunda rodada (12/11/2026): 7 grupos × 10 seeds = 70 instâncias, limite de 600 s por instância.
-- As 70 soluções passam no verificador independente (`verificada=True`).
-- 62 instâncias foram resolvidas ao ótimo (status 2, gap ≤ 0,01%) e 8 atingiram o limite de tempo
-  (status 9): 4 em `realista_12r` e 4 em `mina_grande`, com gap final entre 0,05% e 1,11%. O custo
-  dessas 8 é a melhor solução encontrada.
+With the fleet fixed at 40 trucks, going from 8 to 20 cycles raises the median solve time 12× and going from 3 to 12 routes raises it another 79×. Solve time correlates strongly with the number of binary variables (0.95 on a log scale).
 
-| Escala | Ótimas | Tempo mediano (s) | Gap máx. |
-|---|---|---|---|
-| Pequena | 10/10 | 0,01 | ≤ 0,01% |
-| Média | 10/10 | 0,05 | ≤ 0,01% |
-| Grande | 10/10 | 0,30 | ≤ 0,01% |
-| Realista | 10/10 | 3,60 | ≤ 0,01% |
-| Realista (12 rotas) | 6/10 | 286 | 1,11% |
-| Mina média | 10/10 | 1,48 | ≤ 0,01% |
-| Mina grande | 6/10 | 188 | 0,64% |
+Compared with the simple refueling rule, under the same assignment, optimizing the stops cut total cost by **0.83%**. With a single fuel price, the liters a truck needs on a given route are fixed, so stop optimization can only act on queue and pumping time. That explains why the gain is modest.
 
-Com 40 caminhões, a mediana do tempo é 0,3 s com 3 rotas e 8 ciclos, 3,6 s com 3 rotas e 20 ciclos e
-286 s com 12 rotas e 20 ciclos. O gargalo é o número de rotas, mais do que o de ciclos. Os tempos
-variam um pouco entre rodadas; perto do limite de 600 s, uma mesma instância pode ou não fechar.
+### Sensitivity to the idle-hour cost
 
-## Sensibilidade ao custo da hora parada
-O custo da hora parada (R$ 1.500/h) é uma estimativa. O experimento reroda as mesmas instâncias
-(mesma seed) com R$ 1.500, 5.000 e 15.000 por hora, mudando só esse valor, e registra o custo, a
-divisão do custo (combustível, bombeio e fila), o número de paradas, os litros por parada e o
-"arrependimento": quanto custaria, no cenário novo, reusar o plano de abastecimento ótimo do
-caso-base em vez de reotimizar.
+<p align="center">
+  <img src="figures/sensitivity/sens1_composicao_custo.png" width="820" alt="Cost composition for idle-hour costs of R$ 1,500, 5,000 and 15,000">
+</p>
+
+- A 10× more expensive idle hour increases total cost by only 1.68× to 1.98×, because fuel is still a large part of the cost.
+- The number of stops barely changes. The model shifts trucks toward routes with cheaper stops and buys more liters per stop.
+- Re-optimizing pays off when downtime is expensive. Keeping the base plan at R$ 15,000/h costs a median of 1.25% (realistic), 3.47% (mid-size mine) and 7.41% (large mine) more, with a maximum of 20.2%.
+
+More figures are in [`figures/main`](figures/main) and [`figures/sensitivity`](figures/sensitivity).
+
+## Repository structure
 
 ```
-python sensibilidade/sensibilidade_custo_hora.py media --seeds 1-3                  # teste rápido
-python sensibilidade/sensibilidade_custo_hora.py realista --saida results/sensibilidade_custo_hora.csv
-python sensibilidade/sensibilidade_custo_hora.py mina_media --saida results/sens_mina_media.csv
-python sensibilidade/sensibilidade_custo_hora.py mina_grande --apenas-fechadas --tempo 1800 \
-       --saida results/sens_mina_grande.csv
-python sensibilidade/graficos_sensibilidade.py results sensibilidade               # figuras e tabela
+├── src/
+│   ├── fleet_fueling_optimizer.py   # instance generator, Gurobi model, verifier, experiments
+│   ├── sensibilidade_custo_hora.py  # sensitivity to the idle-hour cost
+│   ├── validacao_decomposicao.py    # exact decomposition (HiGHS) + baseline rule
+│   ├── graphics.py                  # figures and summary table for the main experiments
+│   └── graficos_sensibilidade.py    # figures and table for the sensitivity analysis
+├── instances/                       # 70 instances (inst_<group>_<seed>.json)
+├── results/                         # raw CSV outputs (main runs, sensitivity, validation)
+├── figures/
+│   ├── main/                        # performance and cost figures + summary table
+│   └── sensitivity/                 # sensitivity figures + table
+├── docs/
+│   └── artigo_abastecimento_frota_mina.pdf
+├── requirements.txt
+└── LICENSE
 ```
-Rode da raiz do repositório. Opções úteis: `--retomar` continua uma rodada interrompida,
-`--apenas-fechadas` usa só as seeds que o caso-base resolveu ao ótimo, `--seeds` e `--valores`
-escolhem as seeds e os custos. O caso-base (R$ 1.500/h) é conferido contra `results/resultados.csv`.
 
-### Execução (18/11/2026)
-- Realista (40×3×20): 10 seeds, limite de 600 s. Mina média: 10 seeds, 600 s. Mina grande: 6 seeds (as
-  que fecharam no caso-base), limite de **1.800 s**. Total: 78 linhas.
-- As 78 soluções passam no verificador (`verificada=True`) e o caso-base confere com o `resultados.csv`
-  em todas as instâncias.
-- 9 das 78 linhas não fecharam no limite de tempo (todas com R$ 5.000/h ou 15.000/h), com gap de até
-  4,33% (realista), 7,22% (mina média) e 9,03% (mina grande). Nenhuma ficou inviável.
+## Reproducing the results
 
-### Resultados (medianas por escala)
-| Escala | R$/h | Ótimas | Tempo mediano (s) | Gap máx (%) | Custo ÷ base | Fila (%) | L/parada ÷ base | Extra plano base (% med.) |
-|---|---|---|---|---|---|---|---|---|
-| Realista (40×3×20) | 1.500 | 10/10 | 5,5 | 0,01 | 1,00 | 7 | 1,00 | – |
-| Realista (40×3×20) | 5.000 | 10/10 | 92,6 | 0,01 | 1,18 | 20 | 1,01 | 0,02 |
-| Realista (40×3×20) | 15.000 | 8/10 | 183,8 | 4,33 | 1,68 | 41 | 1,05 | 1,25 |
-| Mina média (perfil) | 1.500 | 10/10 | 4,1 | 0,01 | 1,00 | 10 | 1,00 | – |
-| Mina média (perfil) | 5.000 | 9/10 | 10,4 | 0,47 | 1,24 | 25 | 1,03 | 0,00 |
-| Mina média (perfil) | 15.000 | 8/10 | 41,1 | 7,22 | 1,84 | 44 | 1,27 | 3,47 |
-| Mina grande (perfil) | 1.500 | 6/6 | 74,1 | 0,01 | 1,00 | 12 | 1,00 | – |
-| Mina grande (perfil) | 5.000 | 5/6 | 319,6 | 1,65 | 1,28 | 28 | 1,03 | 0,50 |
-| Mina grande (perfil) | 15.000 | 3/6 | 1470,4 | 9,03 | 1,98 | 46 | 1,38 | 7,41 |
+Requires Python 3 and, for the optimization runs, a Gurobi license. The free academic license covers every instance; the size-limited pip license only handles the small and medium groups. Run everything from the repository root.
 
-Colunas: "Custo ÷ base" é o custo ótimo dividido pelo custo com R$ 1.500/h na mesma instância; "Fila"
-é a parcela do custo ótimo gasta com fila; "L/parada ÷ base" é a razão de litros por parada;
-"Extra plano base" é o arrependimento (custo extra de manter o plano de R$ 1.500/h).
+```bash
+pip install -r requirements.txt
 
-- **O custo cresce menos que proporcionalmente à hora parada.** Com a hora 3,3× e 10× mais cara, o
-  custo mediano sobe 1,18× e 1,68× (realista), 1,24× e 1,84× (mina média), 1,28× e 1,98× (mina grande).
-- **A parcela da fila sobe de 7–12% (R$ 1.500/h) para 41–46% (R$ 15.000/h).**
-- **O número de paradas quase não muda** (mediana de 0,91 a 1,00 do caso-base); o que muda é o
-  tamanho do abastecimento: os litros por parada sobem até 1,27× (mina média) e 1,38× (mina grande) a
-  R$ 15.000/h. O modelo abastece menos vezes, em volumes maiores.
-- **Reotimizar importa quando a hora parada é cara e a frota é grande.** A mediana do custo extra de
-  manter o plano de R$ 1.500/h é de 0,02% a 5.000/h e 1,25% a 15.000/h no realista; 3,47% (máx. 20,2%)
-  na mina média e 7,41% (máx. 10,4%) na mina grande a 15.000/h. Nas linhas que não fecharam, o valor
-  é um limite inferior do arrependimento real.
-- **O tempo de solução cresce com o custo da hora** (mediana da mina grande: 74 s, 320 s e 1.470 s),
-  provavelmente porque, com a fila mais cara, há mais soluções de custo parecido para o solver separar.
-- Figuras em `sensibilidade/`: `sens1_composicao_custo`, `sens2_custo_relativo`,
-  `sens3_paradas_litros`, `sens4_arrependimento` e `sens5_tempo`.
+# Instance generator only (no Gurobi needed)
+python src/fleet_fueling_optimizer.py diagnostico
 
-## Status
-- [x] Modelagem v3 (com `T = C·P`) e documento do projeto
-- [x] Gerador calibrado com as faixas dos dados reais, testado em todas as escalas e perfis
-- [x] Verificador testado com soluções gulosas (21 instâncias viáveis)
-- [x] Modelo Gurobi testado (roda em todas as escalas e perfis; nenhuma instância inviável)
-- [x] Verificador validado com soluções do Gurobi (70 de 70 verificadas)
-- [x] Experimentos nas escalas e perfis (resultados.csv)
-- [x] Figuras e tabela-resumo (`graphics/`)
-- [x] Sensibilidade ao custo da hora parada (executada em 18/11/2026: 78 linhas, 78 verificadas)
-- [x] Figuras e tabela da sensibilidade (`sensibilidade/`)
+# Quick test on a 5×2×4 instance
+python src/fleet_fueling_optimizer.py teste
 
-## Pendências
-- Registrar o processador, a RAM e a versão do Gurobi usados nos experimentos.
-- Comparar o ótimo com uma política simples de abastecimento (ex.: abastecer ao atingir a reserva).
-- Escrever o relatório.
+# All 70 instances -> results/resultados.csv and instances/
+python src/fleet_fueling_optimizer.py experimentos
 
-## Estrutura do código (docstring do script)
+# Figures and summary table -> figures/main/
+python src/graphics.py
 
+# Sensitivity to the idle-hour cost
+python src/sensibilidade_custo_hora.py realista    --saida results/sensibilidade_custo_hora.csv
+python src/sensibilidade_custo_hora.py mina_media  --saida results/sens_mina_media.csv
+python src/sensibilidade_custo_hora.py mina_grande --apenas-fechadas --tempo 1800 --saida results/sens_mina_grande.csv
+python src/graficos_sensibilidade.py               # -> figures/sensitivity/
+
+# Exact validation by decomposition (no Gurobi needed)
+python src/validacao_decomposicao.py principal     # -> results/validation/
+python src/validacao_decomposicao.py resumo
 ```
-Estrutura:
-  A. gerar_instancia()      -> dados sinteticos reprodutiveis (seed fixa), calibrados
-                               com as faixas dos dados reais
-  B. construir_e_resolver() -> modelo Gurobi com posicoes t (x, y, q, v)
-  C. verificar_solucao()    -> checagem independente da solucao
-  D. rodar_experimentos()   -> loop escalas x seeds -> resultados.csv
-  E. tabela_resumo()        -> tabela do relatorio (media/desvio por escala)
 
-Uso:
-  python fleet_fueling_optimizer.py diagnostico    # so o gerador (nao precisa do Gurobi)
-  python fleet_fueling_optimizer.py teste          # uma instancia pequena (5x2x4)
-  python fleet_fueling_optimizer.py experimentos   # escalas + perfis de mina x N seeds
-```
+Instances are deterministic: the same group and seed always generate the same data. The figure scripts and the decomposition summary only read the CSVs in `results/`, so they can be rerun without Gurobi.
+
+Original experiments ran on an Intel Core i7-1165G7 (4 cores), 16 GB RAM (15.7 GB usable), Windows 11, Python 3.12.4, Gurobi 14.0.0 and SciPy 1.13.1. Solve times near the 600 s limit may vary slightly between runs.
+
+## Assumptions and limitations
+
+A single shift in which every truck runs the same number of cycles and stays on its route. Queues are deterministic and fixed per station (no congestion), the fuel price is uniform, production is not part of the objective, and fuel left in the tank at the end of the shift is not valued. The idle-hour cost (R$ 1,500/h) and pumping rate (600 L/min) are estimates, which is why the sensitivity analysis was run. See Section 5.6 of the paper.
+
+## Authors
+
+- **Samuel Lima Horta**: [GitHub](https://github.com/samucao1803)
+- **Julia Martins dos Santos**
+- **Matheus Guedes Belloni**
+
+Systems Engineering, Universidade Federal de Minas Gerais (UFMG), Belo Horizonte, Brazil.
+
+## License
+
+[MIT](LICENSE)

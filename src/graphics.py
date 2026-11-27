@@ -10,8 +10,8 @@ import pandas as pd
 from matplotlib.lines import Line2D
 from matplotlib.ticker import FuncFormatter
 
-CSV = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("resultados.csv")
-OUT = Path(sys.argv[2]) if len(sys.argv) > 2 else Path("figuras")
+CSV = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("results/resultados.csv")
+OUT = Path(sys.argv[2]) if len(sys.argv) > 2 else Path("figures/main")
 OUT.mkdir(parents=True, exist_ok=True)
 
 LIMITE_S = 600.0          

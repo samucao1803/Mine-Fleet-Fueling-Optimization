@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Gurobi
+gurobi.log
+*.lic
+
+# Raw operational data is confidential and must never be versioned
+data/raw/
+
+# Intermediate files written by the sensitivity script
+results/*_solucoes.json
